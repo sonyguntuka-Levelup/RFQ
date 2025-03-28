@@ -39,140 +39,96 @@ test.describe('RFQ API Tests', () => {
   test('Should create a quote successfully', async () => {
     const quoteResponse = await rfqApi.createQuote(authToken);  // Use the auth token
     console.log('Quote Response:', quoteResponse);
-    expect(quoteResponse).toHaveProperty('quoteId');  // Example check
+    expect(quoteResponse).toHaveProperty('quoteId');
+    expect(quoteResponse).toHaveProperty('expiresAt');
+    expect(quoteResponse).toHaveProperty('quoteStatus');
+    expect(quoteResponse).toHaveProperty('pair');
+    expect(quoteResponse).toHaveProperty('side');
+
+    // Ensure quoteId is a valid UUID
+    expect(quoteResponse.quoteId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+    // Print how many seconds the quote is valid after generation
+    const requestedAt = new Date(quoteResponse.requestedAt);
+    const expiresAt = new Date(quoteResponse.expiresAt);
+    const timeDiff = (expiresAt.getTime() - requestedAt.getTime()) / 1000;
+    console.log('The quote expires in: ', timeDiff);
+  
+
+    // Ensure quantities are valid positive numbers
+    expect(Number(quoteResponse.deliverQuantity)).toBeGreaterThan(0);
+    expect(Number(quoteResponse.receiveQuantity)).toBeGreaterThan(0);
+
+    expect(['AWAITING_RESPONSE', 'FILLED', 'EXPIRED']).toContain(quoteResponse.quoteStatus); //I am assuming these are the statuses
+
   });
 
-  test('Should execute a valid quote successfully', async () => {
+  test('Should execute a valid quote successfully with retries', async () => {
     test.setTimeout(60000); // Set timeout for this specific test (60s)
+    
+    const maxRetries = 3;
+    let attempt = 0;
+    let executeResponse;
+    let lastError;
   
     // Ensure we are using a valid (non-expired) quote
     const validQuote = await getValidQuote();
   
-    // Execute quote with the valid quoteId and authToken
-    const executeResponse = await rfqApi.executeQuote(authToken, validQuote.quoteId);
+    while (attempt < maxRetries) {
+      try {
+        console.log(`Attempt ${attempt + 1}: Executing quote...`);
+        executeResponse = await rfqApi.executeQuote(authToken, validQuote.quoteId);
   
-    // Log the response to help with debugging
-    console.log('Execute Response:', executeResponse);
-  
-    // Assert that the response contains an orderId (successful execution)
-    expect(executeResponse).toHaveProperty('orderId');
-  });
-  
-  test('Should execute a valid quote successfully with API mocking', async ({ page, browser }) => {
-    // Create a new API context
-    const apiContext = await request.newContext();
-    const newPage: Page = await browser.newPage();
-  
-    // Mock the /api/v1/orders endpoint
-    await newPage.route('**/api/v1/orders', async (route) => {
-      // Check if the request contains quoteId in the payload
-      const requestPayload = await route.request().postData();
-      const payload = JSON.parse(requestPayload || '{}');
-  
-      if (payload.quoteId) {
-        console.log(`Received quoteId: ${payload.quoteId}`);
+        // Assert that the response contains an orderId (successful execution)
+        expect(executeResponse).toHaveProperty('orderId');
         
-        // Respond with the mocked response
-        await route.fulfill({
-          status: 200,
-          body: JSON.stringify({
-            order: {
-              orderId: "123e4567-e89b-12d3-a456-426614174000",
-              accountId: "123e4567-e89b-12d3-a456-426614174000",
-              orderStatus: "PLACED",
-              side: "BUY",
-              pair: "BTC-USD",
-              strategy: "RFQ",
-              orderPrice: "52100.00",
-              orderQuantity: "1.00",
-              fillQuantity: "1.00",
-              fillPrice: "52100.00",
-              fillPercentage: "100",
-              clientFeeRate: "10",
-              providerFeeRate: "10",
-              placedAt: "2025-03-26T19:31:53.733Z",
-              completedAt: null,
-              clientReference: "text"
-            },
-            executions: [
-              {
-                executionId: "123e4567-e89b-12d3-a456-426614174000",
-                orderId: "123e4567-e89b-12d3-a456-426614174000",
-                accountId: "123e4567-e89b-12d3-a456-426614174000",
-                executedAt: "2025-03-26T19:31:53.733Z",
-                pair: "BTC-USD",
-                side: "BUY",
-                deliverCurrency: "BTC",
-                deliverQuantity: "1.00",
-                receiveCurrency: "USD",
-                receiveQuantity: "52100.00",
-                price: "52100.00",
-                baseQuantity: "0.0016",
-                quoteQuantity: "10.74",
-                clientFeeRate: "10",
-                providerFeeRate: "10",
-                clientFeeQuantity: "52.10",
-                providerFeeQuantity: "52.10",
-                feeCurrency: "USD",
-                executionStatus: "TRADE_EXECUTED",
-                tradeDate: "2025-03-26",
-                valueDate: "2025-03-26",
-                confirmedAt: "2025-03-26T19:31:53.733Z",
-                clientReference: "text",
-                tradeTaxRate: "5",
-                clientTaxQuantity: "2.61",
-                providerTaxQuantity: "2.61"
-              }
-            ]
-          }),
-          contentType: 'application/json',
-        });
-      } else {
-        // If no quoteId is present in the payload, reject the route
-        await route.abort();
+        console.log('Execute Response:', executeResponse);
+        return; // Exit the loop on success
+  
+      } catch (error) {
+        lastError = error;
+      
+        if (error instanceof Error) {
+          console.error(`Error executing quote on attempt ${attempt + 1}:`, error.message);
+          
+          if (error.message.includes('Internal Server Error') && attempt < maxRetries - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1))); // Exponential backoff
+            attempt++;
+          } else {
+            throw new Error(`Failed to execute quote after ${maxRetries} attempts: ${error.message}`);
+          }
+        } else {
+          console.error(`Unknown error encountered:`, error);
+          throw new Error(`Unknown error occurred while executing quote`);
+        }
       }
-    });
-
-    const validQuote = await rfqApi.createQuote(authToken);  // Create a new quote dynamically
-    const dynamicQuoteId = validQuote.quoteId;  // Get the quoteId from the created quote
-    const dynamicAuthToken = authToken;  // Use the dynamically fetched auth token
-  
-    // Send a POST request with the quoteId in the payload
-    const response = await newPage.request.post(`${API_CONFIG.BASE_URL}/api/v1/orders`, {
-      data: {
-        quoteId: dynamicQuoteId,  // Dynamic quoteId
-      },
-      headers: { 'Authorization': `Bearer ${dynamicAuthToken}` },  // Dynamic auth token
-    });
-  
-    // Get the JSON response
-    const responseData = await response.json();
-    console.log('Mocked Response:', responseData);
-  
-    // Assertions to verify that the mock response is as expected
-    expect(responseData).toHaveProperty('order.orderId', '123e4567-e89b-12d3-a456-426614174000');
-    expect(responseData).toHaveProperty('order.orderStatus', 'PLACED');
-    expect(responseData.executions[0]).toHaveProperty('executionId', '123e4567-e89b-12d3-a456-426614174000');
+    }
   });
 
-  /*test('Should verify executed quote appears in the list of orders', async () => {
-    const quoteResponse = await rfqApi.createQuote(authToken);
-    console.log('Quote Created:', quoteResponse);
-
-    const quoteId = quoteResponse.quoteId;
-    expect(quoteId).toBeDefined();
-
-    const executionResponse = await rfqApi.executeQuote(authToken, quoteId);
-    console.log('Execution Response:', executionResponse);
-
-    const orderId = executionResponse.orderId;
-    expect(orderId).toBeDefined(); // Ensure orderId exists
-
-    // Fetch orders and check if the executed quote appears in the list
-    const ordersResponse = await rfqApi.getOrders(authToken);
-    console.log('Orders Response:', ordersResponse);
-
-    const orderExists = ordersResponse.orders.some((order: any) => order.orderId === orderId);
-    expect(orderExists).toBeTruthy();
-  });*/
+  test('Should verify executed quote appears in the list of orders', async () => {
+    try {
+      const quoteResponse = await rfqApi.createQuote(authToken);
+      console.log('Quote Created:', quoteResponse);
+  
+      const quoteId = quoteResponse.quoteId;
+      expect(quoteId).toBeDefined();
+  
+      const executionResponse = await rfqApi.executeQuote(authToken, quoteId);
+      console.log('Execution Response:', executionResponse);
+  
+      const orderId = executionResponse.orderId;
+      expect(orderId).toBeDefined(); // Ensure orderId exists
+  
+      // Fetch orders and check if the executed quote appears in the list
+      const ordersResponse = await rfqApi.getOrders(authToken);
+      console.log('Orders Response:', ordersResponse);
+  
+      const orderExists = ordersResponse.orders.some((order: any) => order.orderId === orderId);
+      expect(orderExists).toBeTruthy();
+    } catch (error) {
+      console.error('Test failed with error:', error);
+      throw error; // Rethrow the error so the test fails properly
+    }
+  });  
 });

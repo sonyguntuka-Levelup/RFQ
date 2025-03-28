@@ -21,7 +21,7 @@ export default class RFQApi {
     return data.access_token;
   }
 
-  // Example function to create a quote (modify as needed)
+//Create Quote
   async createQuote(authToken: string): Promise<any> {
     const response = await this.apiContext.post(`${API_CONFIG.BASE_URL}/api/v1/quotes`, {
       headers: { 
@@ -48,7 +48,6 @@ export default class RFQApi {
   }
   
   // Function to execute a quote (POST /orders)
-  // Update the method to accept both authToken and quoteId
   async executeQuote(authToken: string, quoteId: string) {
     const payload = { quoteId };
   
@@ -76,7 +75,7 @@ export default class RFQApi {
     }
   }
   // Function to get list of orders (GET /orders)
-  /*async getOrders(authToken: string): Promise<any> {
+  async getOrders(authToken: string): Promise<any> {
     const response = await this.apiContext.get(`${API_CONFIG.BASE_URL}/api/v1/orders`, {
       headers: { 
         'Authorization': `Bearer ${authToken}`,
@@ -91,5 +90,5 @@ export default class RFQApi {
     }
 
     return response.json();
-  }*/
+  }
 }
