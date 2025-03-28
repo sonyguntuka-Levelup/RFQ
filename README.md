@@ -49,6 +49,7 @@ Issue: The test fails because the POST /api/v1/orders API, which executes the qu
 Mocking Attempt: Mocking the POST /api/v1/orders API was attempted to bypass the server error, but it couldn't generate a real order tied to the executed quote. Thus, when fetching orders with GET /api/v1/orders, no valid order exists to verify.
 Impact: Since no order is created, the GET /api/v1/orders call returns an empty or incorrect list, causing the test to fail.
 Next Steps: The issue requires resolving the server-side error to allow successful execution of quotes and order creation for the test to work.
+Final Verdict: Test3 is dependent on Test 2. As there are issues with Test 2 not executing as expected. I was not able to execute Test3 in my environment. If you would like to try in any of your local working environments, I request you to please give it a try.
 
 **Challenge 3: Debugging API Requests and Responses**
 Issue:
